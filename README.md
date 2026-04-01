@@ -28,10 +28,21 @@ Large monolithic prompts (85+ instructions) cause poor instruction-following. QR
 
 ## Installation
 
-Copy the `.claude/` directory into any repository:
+Run the setup script from inside any repository:
+
+```bash
+# Via SSH (default)
+curl -fsSL https://raw.githubusercontent.com/k3ii/claude/main/setup-qrspi.sh | bash
+
+# Via HTTPS (if SSH isn't configured)
+curl -fsSL https://raw.githubusercontent.com/k3ii/claude/main/setup-qrspi.sh | bash -s -- --https
+```
+
+Or copy manually:
 
 ```bash
 cp -r .claude/ /path/to/your/repo/.claude/
+mkdir -p thoughts/shared/{plans,tasks}
 ```
 
 The commands will be available as slash commands in Claude Code when you open that repo.
