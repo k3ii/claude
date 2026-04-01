@@ -1,43 +1,96 @@
 ---
-description: Set up a git worktree for isolated implementation
+description: Set up a git worktree for the implementation, resolving the correct root path even if already running inside a worktree.
 model: sonnet
+tools: Bash, Read
 ---
 
-You are the worktree setup step in the QRSPI workflow. Your job is to create a git worktree so the implementation happens in an isolated branch.
+You are setting up an isolated git worktree for a new implementation branch.
 
-## Input
+## Step 1: Read the plan
 
-$ARGUMENTS may contain a plan file path or task slug. If empty, look for the most recent plan file under `thoughts/shared/plans/`.
+Read the plan file passed as an argument to extract:
 
-## Setup
+- The task slug (e.g. `add-user-auth-endpoint`)
+- The suggested branch name (e.g. `feat/add-user-auth-endpoint`)
 
-1. Find and read the plan file to extract:
-   - The task slug
-   - The suggested branch name (e.g., `feat/<task-slug>`)
-2. If no branch name is specified in the plan, use `feat/<task-slug>`
+If no plan file was passed, ask the user: "Which plan file should I use? (e.g. `thoughts/shared/plans/2025-01-08-my-feature.md`)"
 
-## Your Job
+## Step 2: Detect if already inside a worktree
 
-1. Verify the current git state is clean (no uncommitted changes). If dirty, warn the user and stop.
-2. Run: `git worktree add ../worktrees/<branch-name> -b <branch-name>`
-3. Verify the worktree was created successfully by checking the directory exists.
-4. Print the full path to the new worktree.
-5. List the worktree contents briefly so the user can confirm it looks right.
+Run:
+
+```bash
+git rev-parse --git-dir
+```
+
+If the output is something like `/path/to/repo/.git/worktrees/<name>`, you are inside a worktree.
+If the output is `.git` or an absolute path ending in `.git`, you are in the main repo.
+
+## Step 3: Find the main repo root
+
+Run:
+
+```bash
+git worktree list --porcelain
+```
+
+The first entry is always the main worktree. Extract its path — this is `<main-root>`.
+
+## Step 4: Check for conflicts
+
+Before creating anything, check:
+
+1. **Branch already exists:**
+
+```bash
+git branch --list <branch-name>
+```
+
+If it exists, ask the user: "Branch `<branch-name>` already exists. Use it as-is, or choose a new name?"
+
+2. **Worktree path already exists:**
+
+```bash
+ls <main-root>/../worktrees/<branch-name>
+```
+
+If it exists, ask the user: "A worktree at that path already exists. Remove it, use it as-is, or choose a different path?"
+
+Do not proceed until conflicts are resolved.
+
+## Step 5: Create the worktree
+
+Create the worktree relative to the **main repo root**, not the current directory:
+
+```bash
+git -C <main-root> worktree add ../worktrees/<branch-name> -b <branch-name>
+```
+
+This ensures consistent placement regardless of where Claude Code is currently running.
+
+## Step 6: Confirm
+
+Run:
+
+```bash
+git worktree list
+```
+
+Verify the new worktree appears in the list.
+
+Print in chat:
+
+```
+✓ Worktree created at: <main-root>/../worktrees/<branch-name>
+  Branch: <branch-name>
+
+Open that directory and run:
+  /implement_plan thoughts/shared/plans/<plan-file>.md
+```
 
 ## Rules
 
-1. If the branch already exists, tell the user and ask how to proceed (use existing branch, pick a new name, or abort).
-2. If `../worktrees/` doesn't exist, create it first.
-3. Do NOT start implementing anything. This step only sets up the workspace.
-4. Keep output minimal — just confirm success and give next steps.
-
-## Error Handling
-
-- If `git worktree add` fails, show the full error and suggest fixes.
-- Common issues: branch already exists, uncommitted changes, worktree path already in use.
-
-## Ending
-
-After successful creation, end your response with exactly:
-
-> Worktree ready at `../worktrees/<branch-name>`. Open it and run `/implement_plan <plan-file-path>`
+- Always resolve the main repo root before creating a worktree — never assume you're in it
+- Never create a worktree inside another worktree's directory
+- Always check for branch and path conflicts before running `git worktree add`
+- If anything is unclear, ask before running destructive or hard-to-reverse commands
