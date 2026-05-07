@@ -56,6 +56,8 @@ ls <main-root>/../worktrees/<branch-name>
 
 If it exists, ask the user: "A worktree at that path already exists. Remove it, use it as-is, or choose a different path?"
 
+If the user chooses **"use it as-is"**: set `<worktree-path>` to the existing worktree path, skip Step 5, and go directly to Step 6 (Provision `.claude`). Then continue to Step 7.
+
 Do not proceed until conflicts are resolved.
 
 ## Step 5: Create the worktree
@@ -68,7 +70,96 @@ git -C <main-root> worktree add ../worktrees/<branch-name> -b <branch-name>
 
 This ensures consistent placement regardless of where Claude Code is currently running.
 
-## Step 6: Confirm
+## Step 6: Provision `.claude`
+
+The worktree path is `<main-root>/../worktrees/<branch-name>`. Store this as `<worktree-path>`.
+
+1. **Check if the main repo has `.claude/`:**
+
+```bash
+test -d <main-root>/.claude && echo "exists" || echo "missing"
+```
+
+If missing, set provisioning status to `"skipped (no .claude in main repo)"` and proceed to Step 7.
+
+2. **Check the worktree's `.claude/` state:**
+
+```bash
+test -L <worktree-path>/.claude && echo "symlink" || (test -d <worktree-path>/.claude && echo "directory" || echo "absent")
+```
+
+- `"symlink"` → Already provisioned. Set status to `"skipped (already symlinked)"`. Proceed to Step 7.
+- `"directory"` → Real directory exists (shared repo). Run the **merge logic** described below.
+- `"absent"` → Proceed with directory-level symlink (next sub-step).
+
+3. **Compute the relative symlink path** (for the `"absent"` case):
+
+```bash
+python3 -c "import os; print(os.path.relpath('<main-root>/.claude', '<worktree-path>'))"
+```
+
+Store the output as `<relative-claude-path>`.
+
+4. **Create the symlink:**
+
+```bash
+ln -s <relative-claude-path> <worktree-path>/.claude
+```
+
+5. **Verify the symlink resolves:**
+
+```bash
+ls <worktree-path>/.claude/skills/
+```
+
+If this fails, the relative path is wrong. Print an error and ask the user for help. Do not silently continue.
+
+Set provisioning status to `"symlinked .claude → <relative-claude-path>"`.
+
+### Merge logic (for the `"directory"` case)
+
+When `<worktree-path>/.claude` exists as a real directory, add missing skills and agents individually:
+
+1. Ensure subdirectories exist:
+
+```bash
+mkdir -p <worktree-path>/.claude/skills
+mkdir -p <worktree-path>/.claude/agents
+```
+
+2. For each subdirectory in `<main-root>/.claude/skills/`:
+
+   - If it does **not** exist in `<worktree-path>/.claude/skills/`:
+     ```bash
+     relative=$(python3 -c "import os; print(os.path.relpath('<main-root>/.claude/skills/<skill-name>', '<worktree-path>/.claude/skills'))")
+     ln -s "$relative" <worktree-path>/.claude/skills/<skill-name>
+     ```
+   - If it **exists**, compare hashes:
+     ```bash
+     md5 -q <main-root>/.claude/skills/<skill-name>/SKILL.md
+     md5 -q <worktree-path>/.claude/skills/<skill-name>/SKILL.md
+     ```
+     If hashes match → skip (in sync). If hashes differ → skip (intentionally different, do not overwrite).
+
+3. For each file in `<main-root>/.claude/agents/`:
+
+   - If it does **not** exist in `<worktree-path>/.claude/agents/`:
+     ```bash
+     relative=$(python3 -c "import os; print(os.path.relpath('<main-root>/.claude/agents/<agent-file>', '<worktree-path>/.claude/agents'))")
+     ln -s "$relative" <worktree-path>/.claude/agents/<agent-file>
+     ```
+   - If it **exists**, compare hashes:
+     ```bash
+     md5 -q <main-root>/.claude/agents/<agent-file>
+     md5 -q <worktree-path>/.claude/agents/<agent-file>
+     ```
+     Same logic: match → skip, differ → skip.
+
+4. Report counts: how many added, how many already present, how many differ (kept existing).
+
+Set provisioning status to `"merged: <N> added, <M> already present, <K> differ (kept existing)"`.
+
+## Step 7: Confirm
 
 Run:
 
@@ -81,8 +172,9 @@ Verify the new worktree appears in the list.
 Print in chat:
 
 ```
-✓ Worktree created at: <main-root>/../worktrees/<branch-name>
+✓ Worktree created at: <worktree-path>
   Branch: <branch-name>
+  Skills: <provisioning-status>
 
 Open that directory and run:
   /implement_plan thoughts/shared/plans/<plan-file>.md
